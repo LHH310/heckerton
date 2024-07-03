@@ -1,7 +1,6 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-import math
 
 def calculate_angle(a, b, c):
     a = np.array(a)
@@ -15,9 +14,6 @@ def calculate_angle(a, b, c):
     angle = np.arccos(cosine_angle)
     
     return np.degrees(angle)
-
-def draw_3d_box(image, landmarks, connections):
-    # 기존 함수와 동일
 
 mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
@@ -38,7 +34,7 @@ with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as 
     if results.pose_landmarks:
         landmarks = results.pose_landmarks.landmark
         
-        # 양쪽 어깨와 골반의 중간점 계산
+        # 어깨, 골반, 무릎의 좌표 추출
         left_shoulder = np.array([landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
                                   landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y])
         right_shoulder = np.array([landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x,
@@ -47,50 +43,47 @@ with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as 
                              landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y])
         right_hip = np.array([landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].x,
                               landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].y])
+        left_knee = np.array([landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x,
+                              landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y])
+        right_knee = np.array([landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value].x,
+                               landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value].y])
         
-        mid_shoulder = (left_shoulder + right_shoulder) / 2
-        mid_hip = (left_hip + right_hip) / 2
-        
-        # 척추의 방향 벡터 계산
-        spine_vector = mid_shoulder - mid_hip
-        
-        # 수직 벡터 (y축)
-        vertical_vector = np.array([0, -1])
-        
-        # 척추와 수직 벡터 사이의 각도 계산
-        angle = np.degrees(np.arccos(np.dot(spine_vector, vertical_vector) / 
-                                     (np.linalg.norm(spine_vector) * np.linalg.norm(vertical_vector))))
-        
-        # 측면 이미지 여부 확인
-        is_side_view = abs(left_shoulder[0] - right_shoulder[0]) < 0.1
+        # 측면 이미지 여부 확인 (어깨 너비와 골반 너비 비교)
+        shoulder_width = np.linalg.norm(right_shoulder - left_shoulder)
+        hip_width = np.linalg.norm(right_hip - left_hip)
+        is_side_view = shoulder_width < hip_width * 0.7
         
         if is_side_view:
             # 측면 이미지일 경우 허리 각도 계산
-            shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
-                        landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-            hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x,
-                   landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
-            knee = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].x,
-                    landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value].y]
-            
-            angle = calculate_angle(shoulder, hip, knee)
+            if left_shoulder[0] < right_shoulder[0]:  # 왼쪽을 바라보고 있는 경우
+                angle = calculate_angle(left_shoulder, left_hip, left_knee)
+            else:  # 오른쪽을 바라보고 있는 경우
+                angle = calculate_angle(right_shoulder, right_hip, right_knee)
+        else:
+            # 정면 이미지일 경우 척추 기울기 계산
+            mid_shoulder = (left_shoulder + right_shoulder) / 2
+            mid_hip = (left_hip + right_hip) / 2
+            spine_vector = mid_shoulder - mid_hip
+            vertical_vector = np.array([0, -1])
+            angle = np.degrees(np.arccos(np.dot(spine_vector, vertical_vector) / 
+                                         (np.linalg.norm(spine_vector) * np.linalg.norm(vertical_vector))))
         
         # 자세 판단 및 표시
         if is_side_view:
             if angle > 170:
                 posture = "Straight"
                 color = (0, 255, 0)  # 녹색
-            elif angle > 150:
+            elif angle > 140:
                 posture = "Slightly bent"
                 color = (0, 255, 255)  # 노란색
             else:
                 posture = "Bent"
                 color = (0, 0, 255)  # 빨간색
         else:
-            if angle < 10:
+            if angle < 5:
                 posture = "Straight"
                 color = (0, 255, 0)  # 녹색
-            elif angle < 20:
+            elif angle < 15:
                 posture = "Slightly bent"
                 color = (0, 255, 255)  # 노란색
             else:
@@ -100,6 +93,7 @@ with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as 
         # 결과 표시
         cv2.putText(image, f'Angle: {angle:.2f}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.putText(image, f'Posture: {posture}', (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2, cv2.LINE_AA)
+        cv2.putText(image, f'View: {"Side" if is_side_view else "Front"}', (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
         
         # 포즈 랜드마크 그리기
         mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
